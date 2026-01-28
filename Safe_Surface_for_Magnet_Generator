@@ -1,0 +1,100 @@
+import magpylib as mp
+import numpy as np
+from skimage.measure import marching_cubes
+import trimesh
+import os
+import pyvista
+import subprocess
+
+
+min_mag_safe = 0.014  #Minimum field magnitude threshold in T
+
+max_mag_safe = 0.015  #Maximum field magnitude threshold in T
+
+grid_repeat = 300
+
+
+
+#1480 = magnetic residual of N52 Magnets, (29.5mm diameter, 16.8mm height), magnet center is origin (0,0,0)
+
+# magnetiztion (T), Dimension (M), Position (M)
+
+model = mp.magnet.Cylinder(polarization=(0,0,1.48), dimension=(0.0295, 0.0168), position=(0,0,0))
+
+
+
+#Creating a grid of points to evaluate the magnetic field
+
+range = np.linspace(-0.12, 0.12, grid_repeat)
+
+X, Y, Z = np.meshgrid(range, range, range, indexing='ij')
+
+points = np.stack((X, Y, Z), axis=-1)
+
+
+
+#Evaluating magnetic field strength at each point in the grid
+
+B = model.getB(points)
+
+mag = np.linalg.norm(B, axis=-1)
+
+
+
+vol = np.minimum(mag - min_mag_safe, max_mag_safe - mag)  # >0 inside band, <0 outside
+
+
+
+dx = range[1] - range[0]
+
+dy = dx
+
+dz = dx
+
+
+
+verts, faces, normals, values = marching_cubes(vol, level=0.0, spacing=(dx, dy, dz)) 
+
+verts += np.array([range[0], range[0], range[0]])
+
+mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals, process=False)
+
+print("CWD:", os.getcwd())
+
+print("Script dir:", os.path.dirname(os.path.abspath(__file__)))
+
+
+
+
+out_dir = os.path.join(os.path.expanduser("~"), "Documents")
+
+os.makedirs(out_dir, exist_ok=True)
+
+out_path = os.path.join(out_dir, "mag_band.stl")
+
+
+
+try:
+
+    mesh.export(out_path)
+
+    print("Wrote:", out_path)
+
+    print("Exists?", os.path.exists(out_path), "Size:", os.path.getsize(out_path))
+
+    subprocess.run(["explorer", "/select,", out_path], check=False)
+
+
+
+except PermissionError as e:
+
+    print("PermissionError exporting STL:", e)
+
+except Exception as e:
+
+    print("Error exporting STL:", e)
+
+
+
+#RETURNS in meters: multiply by 1000 to get mm for 3D printing
+
